@@ -126,7 +126,7 @@ Passe com `-c chave=valor` no `cdk synth/deploy`. Valor inválido para o synth c
 | `budgetEmail` / `budgetUsd` | — / `25` | Cria o AWS Budgets mensal com alertas em 40% e 100% |
 | `allowedOrigins` | `http://localhost:8000` | Origens CORS (`https://...` ou `http://localhost`). `*` é recusado |
 | `apiRateLimit` / `apiBurstLimit` | `10` / `20` | Throttling do stage da HTTP API (req/s) |
-| `classifierModel` / `judgeModel` | Nova Lite / Claude Haiku 4.5 (`us.`) | Modelos usados; o IAM é derivado deles |
+| `classifierModel` / `judgeModel` | Nova Lite / Claude Haiku 4.5 (`us.`) | Modelos usados; o IAM é derivado deles  Os modelos da Anthropic exigem enviar o formulário de caso de uso da conta antes do primeiro uso (senão o Bedrock responde `ResourceNotFoundException`); sem ele, use `-c judgeModel=us.amazon.nova-pro-v1:0`. |
 | `bedrockGuardrailId` / `bedrockGuardrailVersion` | — / `DRAFT` | Liga o guardrail e o `bedrock:ApplyGuardrail` |
 | `lambdaAssetPath` | `build/lambda` | Pasta do pacote das Lambdas (os testes usam um pacote falso) |
 

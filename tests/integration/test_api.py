@@ -125,3 +125,13 @@ def test_manual_rollback_route_should_restore_previous_version(client):
     assert response.status_code == 200
     assert response.json()["id"] == "v1"
     assert client.post("/api/v1/prompts/rollback").status_code == 409
+
+
+def test_docs_should_load_swagger_assets_under_a_scoped_csp(client):
+    docs = client.get("/docs")
+    assert docs.status_code == 200
+    assert "https://cdn.jsdelivr.net" in docs.headers["Content-Security-Policy"]
+    # O painel continua com a política estrita: nada de script de terceiros nem inline.
+    panel = client.get("/")
+    assert "cdn.jsdelivr.net" not in panel.headers["Content-Security-Policy"]
+    assert "'unsafe-inline'" not in panel.headers["Content-Security-Policy"].split("style-src")[0]

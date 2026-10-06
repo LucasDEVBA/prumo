@@ -23,6 +23,18 @@ CSP = (
     "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 )
 
+# A documentação interativa do FastAPI (Swagger UI e ReDoc) carrega scripts e estilos do
+# cdn.jsdelivr.net e inicializa com um <script> inline. Com a CSP do painel ela abre em branco.
+# A política mais aberta vale SÓ nessas páginas, que não exibem dado de usuário.
+DOCS_PATHS = ("/docs", "/redoc")
+DOCS_CSP = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+    "font-src https://fonts.gstatic.com; img-src 'self' data: https://fastapi.tiangolo.com "
+    "https://cdn.redoc.ly; worker-src blob:; connect-src 'self'; frame-ancestors 'none'; "
+    "base-uri 'none'"
+)
+
 Handler = Callable[[Request], Awaitable[Response]]
 
 
@@ -42,7 +54,8 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Handler) -> Response:
         response = await call_next(request)
-        response.headers.setdefault("Content-Security-Policy", CSP)
+        is_docs = request.url.path.startswith(DOCS_PATHS)
+        response.headers.setdefault("Content-Security-Policy", DOCS_CSP if is_docs else CSP)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers.setdefault("X-Frame-Options", "DENY")
