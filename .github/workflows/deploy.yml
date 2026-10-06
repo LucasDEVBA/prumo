@@ -1,0 +1,131 @@
+name: Deploy
+
+# Só manual: publicar na AWS é uma decisão humana, nunca efeito colateral de um push.
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write # OIDC com a AWS: nenhuma chave de longa duração no GitHub.
+  contents: read
+
+concurrency:
+  group: deploy-prumo
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "24"
+
+jobs:
+  deploy:
+    name: Deploy da PrumoStack
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # O environment permite exigir aprovação no GitHub e prende o "sub" do token OIDC a ele.
+    environment: prod
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Conferir configuração obrigatória
+        env:
+          ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          if [[ -z "${ROLE_ARN}" ]]; then
+            echo "::error::Defina o secret AWS_DEPLOY_ROLE_ARN (ver docs/DEPLOY.md)."
+            exit 1
+          fi
+          if [[ ! "${ACCOUNT_ID}" =~ ^[0-9]{12}$ ]]; then
+            echo "::error::Defina a variável AWS_ACCOUNT_ID com os 12 dígitos da conta."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      # O setup-uv parou de publicar tags maiores (v8+); por isso a versão exata.
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+            infra/uv.lock
+
+      # Os mesmos portões do CI, de novo: o deploy pode ser disparado num commit cujo CI não
+      # rodou (ou falhou), e o que vai para a AWS é o que está neste checkout.
+      - name: Instalar dependências do app (exatamente as do uv.lock)
+        run: uv sync --locked
+
+      - name: Ruff (lint e formatação)
+        run: |
+          uv run --locked ruff check
+          uv run --locked ruff format --check
+
+      - name: Mypy (strict) do app
+        run: uv run --locked mypy
+
+      - name: Pytest do app (inclui os testes lentos)
+        run: uv run --locked pytest -q
+
+      - name: Instalar dependências da infra (lock próprio)
+        working-directory: infra
+        run: uv sync --locked
+
+      - name: Mypy (strict) da infra
+        working-directory: infra
+        run: uv run --locked mypy
+
+      - name: Pytest da infra (invariantes da stack)
+        working-directory: infra
+        run: uv run --locked pytest -q
+
+      - name: Build do pacote das Lambdas
+        run: bash scripts/build_lambda.sh
+
+      - name: Instalar o CLI do CDK (versão exata do package-lock.json)
+        working-directory: infra
+        run: npm ci --no-audit --no-fund
+
+      # Credenciais só depois de todos os portões: nenhum passo acima roda com acesso à conta.
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: prumo-deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+
+      - name: cdk deploy
+        working-directory: infra
+        # Valores entram por variável de ambiente, nunca interpolados no script (evita injeção).
+        env:
+          ALERT_EMAIL: ${{ vars.PRUMO_ALERT_EMAIL }}
+          BUDGET_EMAIL: ${{ vars.PRUMO_BUDGET_EMAIL }}
+          BUDGET_USD: ${{ vars.PRUMO_BUDGET_USD }}
+          ALLOWED_ORIGINS: ${{ vars.PRUMO_ALLOWED_ORIGINS }}
+        run: |
+          context=()
+          if [[ -n "${ALERT_EMAIL}" ]]; then context+=(-c "alertEmail=${ALERT_EMAIL}"); fi
+          if [[ -n "${BUDGET_EMAIL}" ]]; then context+=(-c "budgetEmail=${BUDGET_EMAIL}"); fi
+          if [[ -n "${BUDGET_USD}" ]]; then context+=(-c "budgetUsd=${BUDGET_USD}"); fi
+          if [[ -n "${ALLOWED_ORIGINS}" ]]; then context+=(-c "allowedOrigins=${ALLOWED_ORIGINS}"); fi
+          npx --no -- cdk deploy PrumoStack \
+            --require-approval never \
+            --outputs-file cdk-outputs.json \
+            "${context[@]}"
+
+      - name: Resumo do deploy
+        working-directory: infra
+        run: |
+          {
+            echo "### PrumoStack publicada"
+            echo '```json'
+            cat cdk-outputs.json
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -1,0 +1,36 @@
+[project]
+name = "prumo-infra"
+version = "0.1.0"
+description = "Infraestrutura AWS do Prumo (CDK v2 em Python)."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "aws-cdk-lib>=2.200,<3",
+    "constructs>=10.4,<11",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "mypy>=1.11",
+]
+
+[tool.uv]
+# O infra não é um pacote instalável: o uv só gerencia o venv e o lock.
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+extend = "../pyproject.toml"
+src = ["."]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["app.py", "prumo_infra", "tests"]

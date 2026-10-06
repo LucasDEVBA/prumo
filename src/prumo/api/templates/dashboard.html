@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prumo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="{{ url_for('static', path='prumo.css') }}">
+  <script src="{{ url_for('static', path='dashboard.js') }}" defer></script>
+</head>
+<body data-simulated="{{ 'true' if simulated else 'false' }}" data-slo="{{ slo }}" data-needs-token="{{ 'true' if needs_token else 'false' }}">
+  <header class="top">
+    <div class="wrap top-row">
+      <a class="brand" href="/" aria-label="Prumo, início">
+        <svg width="20" height="26" viewBox="0 0 22 28" aria-hidden="true"><line x1="11" y1="0" x2="11" y2="14" stroke="currentColor" stroke-width="2"/><path d="M11 13 L19 20 L11 28 L3 20 Z" fill="currentColor"/></svg>
+        Prumo
+      </a>
+      <p class="mode">{{ 'Modo simulado: dados sintéticos, sem custo' if simulated else 'Modo AWS: Bedrock + DynamoDB + AppConfig' }}</p>
+      <nav aria-label="Links"><a href="/docs">API (OpenAPI)</a></nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="intro">
+      <h1>Taxa real de acerto da IA em produção</h1>
+      <p>O juiz LLM confere todas as decisões, mas tem pontos cegos. Uma amostra aleatória revisada por pessoas mede esses pontos cegos e corrige a nota do juiz. Abaixo da meta com segurança, o prompt volta sozinho para a versão anterior.</p>
+    </section>
+
+    {% if needs_token %}
+    <form class="token" id="token-form">
+      <label for="token">Token de administrador</label>
+      <input id="token" type="password" autocomplete="off" required>
+      <button class="btn" type="submit">Usar token</button>
+    </form>
+    {% endif %}
+
+    <section class="controls" aria-label="Controles">
+      <div class="group" id="deploy-buttons" aria-label="Publicar versão de prompt"></div>
+      {% if simulated %}
+      <span class="sep" aria-hidden="true"></span>
+      <div class="group">
+        <label for="labels">Rótulos humanos por hora <input type="range" id="labels" min="5" max="80" step="5" value="40"><output id="labels-out" for="labels">40</output></label>
+      </div>
+      <span class="sep" aria-hidden="true"></span>
+      <div class="group">
+        <label for="auto-rb"><input type="checkbox" id="auto-rb" checked> Rollback automático</label>
+        <button class="btn" type="button" id="play">Pausar</button>
+        <button class="btn" type="button" id="step">Avançar 1 hora</button>
+        <button class="btn" type="button" id="reset">Reiniciar</button>
+      </div>
+      {% endif %}
+    </section>
+
+    <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
+
+    <section class="kpis" aria-live="polite" aria-label="Indicadores">
+      <article class="kpi"><span class="k-label">Prompt em produção</span><span class="k-value" id="k-version">–</span><span class="pill" id="k-status">–</span></article>
+      <article class="kpi judge"><span class="k-label">O juiz diz</span><span class="k-value" id="k-judge">–</span><span class="k-sub">nota crua do juiz LLM</span></article>
+      <article class="kpi est"><span class="k-label">Taxa real estimada</span><span class="k-value" id="k-est">–</span><span class="k-sub" id="k-ci">–</span></article>
+      <article class="kpi"><span class="k-label">Taxa de queima do orçamento</span><span class="k-value" id="k-burn">–</span><span class="k-sub" id="k-budget">–</span></article>
+      <article class="kpi"><span class="k-label">Rótulos humanos</span><span class="k-value" id="k-labels">–</span><span class="k-sub" id="k-labels-sub">–</span></article>
+    </section>
+
+    <div class="grid">
+      <section class="panel" aria-labelledby="t-chart">
+        <h2 id="t-chart">Taxa de acerto nas últimas 48 leituras</h2>
+        <p class="sub">{{ 'A linha tracejada fina é a verdade, que só existe no simulador. Em produção ninguém a vê.' if simulated else 'Cada ponto é uma leitura horária do estimador.' }}</p>
+        <div class="chart-wrap"><svg class="chart" id="chart" viewBox="0 0 760 300" role="img" aria-label="Taxa de acerto: nota do juiz, taxa real estimada com faixa de confiança e meta."></svg></div>
+        <ul class="legend">
+          <li><i class="l-judge"></i>O juiz diz</li>
+          <li><i class="l-est"></i>Taxa real estimada</li>
+          <li><i class="l-band"></i>Faixa de confiança</li>
+          {% if simulated %}<li><i class="l-truth"></i>Verdade (só no simulador)</li>{% endif %}
+          <li><i class="l-slo"></i>Meta de {{ (slo * 100) | round | int }}%</li>
+        </ul>
+      </section>
+      <section class="panel" aria-labelledby="t-events">
+        <h2 id="t-events">Eventos</h2>
+        <p class="sub">Deploys, alarmes e rollbacks.</p>
+        <ol class="log" id="log"></ol>
+      </section>
+    </div>
+
+    <section class="panel" aria-labelledby="t-queue">
+      <h2 id="t-queue">Fila de revisão humana</h2>
+      <p class="sub">Você é o revisor. Leia o lead, compare com a rubrica e diga se a IA acertou. Só decisões sorteadas aparecem aqui: rotular outras enviesaria a conta.</p>
+      <div class="queue" id="queue"></div>
+      <details class="rubric">
+        <summary>Ver a rubrica usada como gabarito</summary>
+        <ul>{% for line in rubric %}<li>{{ line.lstrip('- ').strip() }}</li>{% endfor %}</ul>
+      </details>
+    </section>
+
+    <section class="panel" aria-labelledby="t-try">
+      <h2 id="t-try">Classificar um lead pela API</h2>
+      <p class="sub">{{ 'No modo simulado, use o formato dos leads sintéticos.' if simulated else 'Texto livre: vai para o Bedrock.' }}</p>
+      <form class="try" id="try-form">
+        <label for="lead-text">Texto do lead</label>
+        <textarea id="lead-text" rows="2" maxlength="2000" required>Sou professora, tenho 41 anos. Movimento em média R$ 14.000 por mês, sem empréstimos.</textarea>
+        <button class="btn primary" type="submit">Classificar</button>
+      </form>
+      <p class="try-result" id="try-result" aria-live="polite"></p>
+    </section>
+  </main>
+
+  <footer class="wrap foot">Prediction-Powered Inference (Angelopoulos et al., Science 2023) · sequências de confiança assintóticas (Waudby-Smith et al., 2024).</footer>
+</body>
+</html>

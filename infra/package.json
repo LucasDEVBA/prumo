@@ -1,0 +1,12 @@
+{
+  "name": "prumo-infra-cli",
+  "private": true,
+  "description": "Versão exata do CLI do CDK usada no CI, no deploy e localmente (npm ci + npx cdk).",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "aws-cdk": "2.1144.0"
+  }
+}

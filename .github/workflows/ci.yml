@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "24"
+
+jobs:
+  app:
+    name: App (lint, tipos e testes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      # O setup-uv parou de publicar tags maiores (v8+) por segurança da cadeia de suprimentos;
+      # por isso a versão exata.
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      # --locked: lock desatualizado em relação ao pyproject.toml quebra aqui, não em produção.
+      - name: Instalar dependências (exatamente as do uv.lock)
+        run: uv sync --locked
+
+      - name: Ruff (lint)
+        run: uv run --locked ruff check
+
+      - name: Ruff (formatação)
+        run: uv run --locked ruff format --check
+
+      - name: Mypy (strict)
+        run: uv run --locked mypy
+
+      - name: Pytest com cobertura (inclui os testes lentos)
+        run: >-
+          uv run --locked pytest --cov=prumo --cov-report=term-missing --cov-report=xml
+          --cov-fail-under=80
+
+      - name: Publicar relatório de cobertura
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: ignore
+          retention-days: 14
+
+  infra:
+    name: Infra (CDK)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          working-directory: infra
+          cache-dependency-glob: |
+            infra/uv.lock
+            uv.lock
+
+      - name: Instalar dependências da infra (lock próprio)
+        working-directory: infra
+        run: uv sync --locked
+
+      - name: Mypy (strict) da infra
+        working-directory: infra
+        run: uv run --locked mypy
+
+      - name: Testes da stack (aws_cdk.assertions)
+        working-directory: infra
+        run: uv run --locked pytest -q
+
+      # Sai do uv.lock da raiz; com CI=true o script recusa resolver sem lock.
+      - name: Build do pacote das Lambdas
+        run: bash scripts/build_lambda.sh
+
+      - name: Instalar o CLI do CDK (versão exata do package-lock.json)
+        working-directory: infra
+        run: npm ci --no-audit --no-fund
+
+      # --no: nunca baixa outro pacote se o CLI local não estiver instalado.
+      - name: cdk synth (sem credenciais AWS)
+        working-directory: infra
+        run: npx --no -- cdk synth -q
