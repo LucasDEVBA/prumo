@@ -41,6 +41,19 @@ O caso perigoso: alguém troca o prompt, a IA passa a errar mais e **nada quebra
 
 Um monitor que olhasse só o juiz **nunca alarmaria**: a nota dele mal se mexe.
 
+### Teste real na AWS
+
+Com a stack implantada numa conta AWS (us-east-1), enviei **30 leads sintéticos** pela API. O gerador conhece a resposta certa de cada um, então dá para comparar o que o juiz disse com a verdade:
+
+| | Resultado |
+|---|---|
+| Classificador (Amazon Nova Lite) — acerto real | **60%** (18 de 30) |
+| Juiz LLM (Amazon Nova Pro) — o que ele aprovou | **70%** (21 de 30) |
+| Classificações erradas que o juiz deixou passar | **4** |
+| Erros HTTP / tempo por lead | 0 / ~2,6 s |
+
+O juiz foi otimista em 10 pontos: exatamente o viés que o Prumo existe para medir e descontar. A amostra é pequena (30), então o número serve como demonstração, não como avaliação dos modelos. O juiz padrão do código é o Claude Haiku 4.5 (família diferente do classificador); nessa conta foi usado o Nova Pro porque os modelos da Anthropic exigem um formulário de caso de uso antes do primeiro uso (`-c judgeModel=` troca o modelo no deploy).
+
 **Por que o padrão é o método mais lento?** O `ppi_ci` usa um intervalo de confiança comum, que vale para **uma** consulta. O Prumo consulta a cada hora, e a cada consulta a chance de alarme falso cresce. O `ppi_cs` usa uma **sequência de confiança**, que continua válida mesmo consultada para sempre. É mais lento para detectar, mas a garantia contra alarme falso é real. Os testes provam isso por simulação (veja abaixo).
 
 ## Rodando localmente (sem AWS, sem custo)
@@ -145,7 +158,7 @@ tests/          unitários, propriedades (Hypothesis), Monte Carlo e integraçã
 - A garantia da sequência de confiança é assintótica: vale bem a partir de algumas dezenas de rótulos, por isso há um mínimo de 30 antes de qualquer decisão.
 - O núcleo estatístico reimplementa métodos publicados. Bibliotecas como `ppi_py` servem de referência para validação.
 - Se o processo cair entre criar uma versão hospedada no AppConfig e implantá-la, a trava otimista recusa novos deploys até alguém implantar ou apagar essa versão. É o lado seguro (recusar em vez de sobrescrever), mas ainda não há recuperação automática.
-- Ainda não houve deploy numa conta AWS real: a infraestrutura está validada por 56 testes do template e pelo `cdk synth`, e os adaptadores por Stubber e moto.
+- O teste real na AWS usou 30 leads: suficiente para demonstrar o viés do juiz, pequeno demais para avaliar os modelos.
 
 ## Referências
 
@@ -159,4 +172,4 @@ tests/          unitários, propriedades (Hypothesis), Monte Carlo e integraçã
 
 Prumo measures the **real accuracy of an LLM in production**. An LLM judge reviews every decision but is systematically biased. A small random sample of human labels measures that bias and corrects the judge's score (prediction-powered inference), producing an estimate with an **anytime-valid confidence sequence**. When the whole interval falls below the SLO for two consecutive hourly reads, a CloudWatch alarm triggers a Lambda that **rolls the prompt version back** in AppConfig.
 
-In simulation, a regression from 92% to 76% accuracy, which the raw judge score barely registers (~91%), is caught 10/10 times with zero false rollbacks on a better prompt. Built with Python 3.12, FastAPI, Bedrock (Converse + tool use), Lambda, Step Functions (`waitForTaskToken`), AppConfig, CloudWatch EMF, DynamoDB and AWS CDK in Python.
+In simulation, a regression from 92% to 76% accuracy, which the raw judge score barely registers (~91%), is caught 10/10 times with zero false rollbacks on a better prompt. Deployed on AWS with real models, 30 synthetic leads showed the same effect: Amazon Nova Lite was right 60% of the time while the Nova Pro judge approved 70%, letting 4 wrong classifications through. Built with Python 3.12, FastAPI, Bedrock (Converse + tool use), Lambda, Step Functions (`waitForTaskToken`), AppConfig, CloudWatch EMF, DynamoDB and AWS CDK in Python.
